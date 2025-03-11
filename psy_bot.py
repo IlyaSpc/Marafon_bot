@@ -10,8 +10,8 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from datetime import datetime, timedelta
 import requests
 import json
-import os
-
+import os  # Для переменных окружения
+from aiohttp import web  # Для веб-сервера Render
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -27,7 +27,7 @@ scheduler = AsyncIOScheduler()
 scheduler.start()
 
 # URL для загрузки сообщений из GitHub
-MESSAGES_URL = "https://raw.githubusercontent.com/IlyaSpc/Marafon_bot/master/messages.json"
+MESSAGES_URL = "https://raw.githubusercontent.com/IlyaSpc/Marafon_bot/main/messages.json"
 
 # Загрузка сообщений из облака
 def load_messages():
@@ -267,6 +267,23 @@ async def process_day_2_q2(message: types.Message, state: FSMContext):
     conn.commit()
     conn.close()
 
-# Запуск бота
+# Веб-сервер для Render
+async def health_check(request):
+    return web.Response(text="Bot is running")
+
+async def setup_webserver():
+    app = web.Application()
+    app.add_routes([web.get('/', health_check)])
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.getenv("PORT", 10000))  # Render использует PORT, по умолчанию 10000
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    await site.start()
+    logging.info(f"Web server started on port {port}")
+
+# Запуск бота и веб-сервера
 if __name__ == '__main__':
-    executor.start_polling(dp, skip_updates=True)
+    import asyncio
+    loop = asyncio.get_event_loop()
+    loop.create_task(setup_webserver())
+    executor.start_polling(dp, skip_updates=True, loop=loop)
