@@ -1,12 +1,13 @@
 import logging
 import sqlite3
-import asyncio
 from aiogram import Bot, Dispatcher, types
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from aiogram.dispatcher import FSMContext
 from aiogram.dispatcher.filters import CommandStart
 from aiogram.dispatcher.filters.state import State, StatesGroup
 from aiogram.utils import executor
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from datetime import datetime, timedelta
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -16,6 +17,10 @@ BOT_TOKEN = "7904391590:AAGeQ-Lcsp5GQEEZLq_4veqsSOITr7xiaE4"
 bot = Bot(token=BOT_TOKEN)
 storage = MemoryStorage()
 dp = Dispatcher(bot, storage=storage)
+
+# Инициализация планировщика для напоминаний
+scheduler = AsyncIOScheduler()
+scheduler.start()
 
 # Инициализация базы данных SQLite
 def init_db():
@@ -59,6 +64,38 @@ class MarathonStates(StatesGroup):
     DAY_13_Q1 = State()
     DAY_14_Q1 = State()
 
+# Функция для отправки напоминаний
+async def send_reminder(user_id, message_text):
+    try:
+        await bot.send_message(user_id, message_text)
+    except Exception as e:
+        logging.error(f"Ошибка при отправке напоминания пользователю {user_id}: {e}")
+
+# Планировщик напоминаний
+def schedule_reminders(user_id, state_name):
+    scheduler.add_job(
+        send_reminder,
+        'date',
+        run_date=datetime.now() + timedelta(hours=3),
+        args=[user_id, "Не откладывай свой успех! Напиши ответ, чтобы продолжить марафон! 💪"],
+        id=f"reminder_3h_{user_id}_{state_name}"
+    )
+    scheduler.add_job(
+        send_reminder,
+        'date',
+        run_date=datetime.now() + timedelta(hours=6),
+        args=[user_id, "Разбор твоих ответов поможет двигаться дальше! Напиши их сейчас! 🚀"],
+        id=f"reminder_6h_{user_id}_{state_name}"
+    )
+
+# Удаление напоминаний после ответа
+def remove_reminders(user_id, state_name):
+    try:
+        scheduler.remove_job(f"reminder_3h_{user_id}_{state_name}")
+        scheduler.remove_job(f"reminder_6h_{user_id}_{state_name}")
+    except Exception:
+        pass
+
 # Стартовая команда /start
 @dp.message_handler(CommandStart())
 async def cmd_start(message: types.Message):
@@ -82,6 +119,7 @@ async def cmd_start(message: types.Message):
     )
     await message.answer(welcome_text)
     await MarathonStates.DAY_0_GOAL.set()
+    schedule_reminders(user_id, "DAY_0_GOAL")
 
 # День 0: Формулировка цели
 @dp.message_handler(state=MarathonStates.DAY_0_GOAL)
@@ -96,6 +134,8 @@ async def process_day_0_goal(message: types.Message, state: FSMContext):
     conn.commit()
     conn.close()
 
+    remove_reminders(user_id, "DAY_0_GOAL")
+
     await message.answer(
         "Отлично! Давай уточним твою цель по SMART:\n"
         "1️⃣ Конкретная: Что именно ты хочешь достичь?\n"
@@ -106,10 +146,13 @@ async def process_day_0_goal(message: types.Message, state: FSMContext):
         "Ответь на эти вопросы, чтобы уточнить цель!"
     )
     await MarathonStates.DAY_0_SMART.set()
+    schedule_reminders(user_id, "DAY_0_SMART")
 
 @dp.message_handler(state=MarathonStates.DAY_0_SMART)
 async def process_day_0_smart(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
+
+    remove_reminders(user_id, "DAY_0_SMART")
 
     await message.answer(
         "🔥 Отлично! Теперь твоя цель стала четче. Завтра начнем двигаться к ней!\n"
@@ -148,19 +191,27 @@ async def day_1_start(message: types.Message):
             "Отправь свои 7 ответов в чат!"
         )
         await MarathonStates.DAY_1_Q1.set()
+        schedule_reminders(user_id, "DAY_1_Q1")
 
 @dp.message_handler(state=MarathonStates.DAY_1_Q1)
 async def process_day_1_q1(message: types.Message, state: FSMContext):
+    user_id = message.from_user.id
+
+    remove_reminders(user_id, "DAY_1_Q1")
+
     await message.answer(
         "🔥 Круто! Теперь ты четко понимаешь, зачем тебе эта цель.\n"
         "Напоследок напиши 3 предложения, отвечая на вопрос: 'Зачем мне это?'\n\n"
         "(Пример: 'Я хочу машину, потому что это свобода передвижения. Я смогу путешествовать, работать и жить там, где хочу. Это сделает меня счастливее.')"
     )
     await MarathonStates.DAY_1_Q2.set()
+    schedule_reminders(user_id, "DAY_1_Q2")
 
 @dp.message_handler(state=MarathonStates.DAY_1_Q2)
 async def process_day_1_q2(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
+
+    remove_reminders(user_id, "DAY_1_Q2")
 
     await message.answer(
         "🔥 Ты молодец! Сегодня ты сделал первый шаг. Завтра разберемся, действительно ли эта цель твоя! 🎯\n\n"
@@ -194,9 +245,14 @@ async def day_2_start(message: types.Message):
             "Напиши свои ответы в чат!"
         )
         await MarathonStates.DAY_2_Q1.set()
+        schedule_reminders(user_id, "DAY_2_Q1")
 
 @dp.message_handler(state=MarathonStates.DAY_2_Q1)
 async def process_day_2_q1(message: types.Message, state: FSMContext):
+    user_id = message.from_user.id
+
+    remove_reminders(user_id, "DAY_2_Q1")
+
     await message.answer(
         "🔍 Отлично! Теперь давай глубже разберем твои истинные желания.\n"
         "Если вдруг ты понял(а), что цель не совсем твоя, давай попробуем скорректировать ее.\n\n"
@@ -208,10 +264,13 @@ async def process_day_2_q1(message: types.Message, state: FSMContext):
         "Напиши обновленный вариант своей цели!"
     )
     await MarathonStates.DAY_2_Q2.set()
+    schedule_reminders(user_id, "DAY_2_Q2")
 
 @dp.message_handler(state=MarathonStates.DAY_2_Q2)
 async def process_day_2_q2(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
+
+    remove_reminders(user_id, "DAY_2_Q2")
 
     await message.answer(
         "🔥 Супер! Теперь у тебя настоящая, твоя собственная цель! Ты стал(а) на шаг ближе к ее достижению. 💪\n\n"
@@ -245,9 +304,14 @@ async def day_3_start(message: types.Message):
             "Напиши свои ответы в чат!"
         )
         await MarathonStates.DAY_3_Q1.set()
+        schedule_reminders(user_id, "DAY_3_Q1")
 
 @dp.message_handler(state=MarathonStates.DAY_3_Q1)
 async def process_day_3_q1(message: types.Message, state: FSMContext):
+    user_id = message.from_user.id
+
+    remove_reminders(user_id, "DAY_3_Q1")
+
     await message.answer(
         "🔍 Отлично! Теперь давай глубже разберем твои страхи.\n"
         "Чаще всего они кажутся нам больше, чем есть на самом деле.\n\n"
@@ -262,10 +326,13 @@ async def process_day_3_q1(message: types.Message, state: FSMContext):
         "Напиши свои выводы в чат!"
     )
     await MarathonStates.DAY_3_Q2.set()
+    schedule_reminders(user_id, "DAY_3_Q2")
 
 @dp.message_handler(state=MarathonStates.DAY_3_Q2)
 async def process_day_3_q2(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
+
+    remove_reminders(user_id, "DAY_3_Q2")
 
     await message.answer(
         "🔥 Молодец! Теперь ты видишь, что даже если страх реализуется, ты сможешь с этим справиться! Это делает тебя сильнее. 💪\n\n"
@@ -296,10 +363,13 @@ async def day_4_start(message: types.Message):
             "Напиши, что отнимает у тебя больше всего сил (работа, отношения, привычки и т.д.)?"
         )
         await MarathonStates.DAY_4_Q1.set()
+        schedule_reminders(user_id, "DAY_4_Q1")
 
 @dp.message_handler(state=MarathonStates.DAY_4_Q1)
 async def process_day_4_q1(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
+
+    remove_reminders(user_id, "DAY_4_Q1")
 
     await message.answer(
         "🔥 Давай высвободим энергию для достижения цели! Подумай, как можно минимизировать этот энергозатратчик.\n"
@@ -330,10 +400,13 @@ async def day_5_start(message: types.Message):
             "Напиши свои страхи, а потом попробуй ответить: как ты можешь с ними справиться?"
         )
         await MarathonStates.DAY_5_Q1.set()
+        schedule_reminders(user_id, "DAY_5_Q1")
 
 @dp.message_handler(state=MarathonStates.DAY_5_Q1)
 async def process_day_5_q1(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
+
+    remove_reminders(user_id, "DAY_5_Q1")
 
     await message.answer(
         "🔥 Страх — это нормально. Главное, как ты с ним работаешь!\n"
@@ -364,10 +437,13 @@ async def day_6_start(message: types.Message):
             "Напиши, что это за шаг, и сделай его прямо сейчас!"
         )
         await MarathonStates.DAY_6_Q1.set()
+        schedule_reminders(user_id, "DAY_6_Q1")
 
 @dp.message_handler(state=MarathonStates.DAY_6_Q1)
 async def process_day_6_q1(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
+
+    remove_reminders(user_id, "DAY_6_Q1")
 
     await message.answer(
         "🔥 Не жди мотивации, создавай её действиями!\n"
@@ -397,9 +473,14 @@ async def day_7_start(message: types.Message):
             "❓ Что уже получилось на пути к твоей цели? Напиши 3 вещи, которые ты сделал(а) за эту неделю."
         )
         await MarathonStates.DAY_7_Q1.set()
+        schedule_reminders(user_id, "DAY_7_Q1")
 
 @dp.message_handler(state=MarathonStates.DAY_7_Q1)
 async def process_day_7_q1(message: types.Message, state: FSMContext):
+    user_id = message.from_user.id
+
+    remove_reminders(user_id, "DAY_7_Q1")
+
     await message.answer(
         "🔥 Класс! Видишь, у тебя уже есть реальные успехи! Теперь сделаем еще одно упражнение.\n"
         "✨ Представь, что ты пишешь письмо самому себе через год. Опиши, каких успехов ты уже добился(ась) и что ты чувствуешь.\n"
@@ -407,10 +488,13 @@ async def process_day_7_q1(message: types.Message, state: FSMContext):
         "Напиши свое письмо в чат!"
     )
     await MarathonStates.DAY_7_Q2.set()
+    schedule_reminders(user_id, "DAY_7_Q2")
 
 @dp.message_handler(state=MarathonStates.DAY_7_Q2)
 async def process_day_7_q2(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
+
+    remove_reminders(user_id, "DAY_7_Q2")
 
     await message.answer(
         "🔥 Великолепно! Это письмо поможет тебе укрепить веру в себя и свою цель.\n"
@@ -440,10 +524,13 @@ async def day_8_start(message: types.Message):
             "❓ Как ты отвечаешь себе на вопрос 'А вдруг не получится?' Напиши свои мысли."
         )
         await MarathonStates.DAY_8_Q1.set()
+        schedule_reminders(user_id, "DAY_8_Q1")
 
 @dp.message_handler(state=MarathonStates.DAY_8_Q1)
 async def process_day_8_q1(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
+
+    remove_reminders(user_id, "DAY_8_Q1")
 
     await message.answer(
         "🔥 Преодолей внутреннего критика! Завтра разберем, как окружение влияет на твой успех."
@@ -472,10 +559,13 @@ async def day_9_start(message: types.Message):
             "❓ Как поддержка (или её отсутствие) влияет на тебя? Напиши 3 человека, которые тебя вдохновляют, и 3, кто тормозит."
         )
         await MarathonStates.DAY_9_Q1.set()
+        schedule_reminders(user_id, "DAY_9_Q1")
 
 @dp.message_handler(state=MarathonStates.DAY_9_Q1)
 async def process_day_9_q1(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
+
+    remove_reminders(user_id, "DAY_9_Q1")
 
     await message.answer(
         "🔥 Ты — это среднее пяти людей, с которыми общаешься. Завтра закрепим результаты!"
@@ -504,10 +594,13 @@ async def day_10_start(message: types.Message):
             "❓ Напиши, что изменилось за марафон? Какие маленькие победы ты одержал(а)?"
         )
         await MarathonStates.DAY_10_Q1.set()
+        schedule_reminders(user_id, "DAY_10_Q1")
 
 @dp.message_handler(state=MarathonStates.DAY_10_Q1)
 async def process_day_10_q1(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
+
+    remove_reminders(user_id, "DAY_10_Q1")
 
     await message.answer(
         "🔥 Маленькие победы создают большие изменения! Завтра разберем, как окружение влияет на успех."
@@ -536,10 +629,13 @@ async def day_11_start(message: types.Message):
             "❓ Напиши 3 человека, которые тебя вдохновляют, и 3 человека, которые тормозят твое развитие."
         )
         await MarathonStates.DAY_11_Q1.set()
+        schedule_reminders(user_id, "DAY_11_Q1")
 
 @dp.message_handler(state=MarathonStates.DAY_11_Q1)
 async def process_day_11_q1(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
+
+    remove_reminders(user_id, "DAY_11_Q1")
 
     await message.answer(
         "🔥 Отлично! Завтра начнем финальные шаги — реальные действия!"
@@ -569,10 +665,13 @@ async def day_12_start(message: types.Message):
             "Напиши в чат: 'Я сделал(а) это!'"
         )
         await MarathonStates.DAY_12_Q1.set()
+        schedule_reminders(user_id, "DAY_12_Q1")
 
 @dp.message_handler(state=MarathonStates.DAY_12_Q1)
 async def process_day_12_q1(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
+
+    remove_reminders(user_id, "DAY_12_Q1")
 
     await message.answer(
         "🔥 Отлично! Продолжаем движение вперед! Завтра сделаем еще один шаг."
@@ -602,10 +701,13 @@ async def day_13_start(message: types.Message):
             "Напиши в чат: 'Я сделал(а) это!'"
         )
         await MarathonStates.DAY_13_Q1.set()
+        schedule_reminders(user_id, "DAY_13_Q1")
 
 @dp.message_handler(state=MarathonStates.DAY_13_Q1)
 async def process_day_13_q1(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
+
+    remove_reminders(user_id, "DAY_13_Q1")
 
     await message.answer(
         "🔥 Великолепно! Завтра подведем итоги марафона!"
@@ -638,10 +740,13 @@ async def day_14_start(message: types.Message):
             "Напиши свой итог!"
         )
         await MarathonStates.DAY_14_Q1.set()
+        schedule_reminders(user_id, "DAY_14_Q1")
 
 @dp.message_handler(state=MarathonStates.DAY_14_Q1)
 async def process_day_14_q1(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
+
+    remove_reminders(user_id, "DAY_14_Q1")
 
     await message.answer(
         "🔥 Ты справился(ась)! Главное – продолжай движение к цели! 💪\n"
